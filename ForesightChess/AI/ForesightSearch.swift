@@ -121,7 +121,7 @@ final class ForesightSearch {
         if m.isCapture { s += 10 }
         if m.promotion != nil { s += 8 }
         game.makeMove(m)
-        if game.isInCheck { s += 5 }
+        if game.isInCheck(game.sideToMove) { s += 5 }
         game.undoMove()
         return s
     }
