@@ -141,23 +141,22 @@ final class StockfishEngine: ObservableObject {
 
         guard let url = URL(string: urlString) else { return false }
 
-        // Use URLSession delegate for real progress.
-        let delegate = DownloadDelegate()
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         let baseProgress = downloadProgress
+        let semaphore = DispatchSemaphore(value: 0)
+        var success = false
 
+        // Pure-delegate download: progress via didWriteData, completion via didFinishDownloadingTo.
+        // (Don't use the completion-handler variant — it suppresses delegate progress callbacks.)
+        let delegate = DownloadDelegate()
         delegate.onProgress = { [weak self] received, expected in
             guard expected > 0 else { return }
             let fileProgress = Double(received) / Double(expected)
             let total = baseProgress + fileProgress * weight
             DispatchQueue.main.async { self?.downloadProgress = min(total, 1.0) }
         }
-
-        var success = false
-        let semaphore = DispatchSemaphore(value: 0)
-        let task = session.downloadTask(with: url) { tmpURL, _, error in
+        delegate.onComplete = { tmpURL in
             defer { semaphore.signal() }
-            guard let tmpURL = tmpURL, error == nil else { return }
+            guard let tmpURL = tmpURL else { return }
             let dest = URL(fileURLWithPath: path)
             try? FileManager.default.removeItem(at: dest)
             do {
@@ -167,14 +166,20 @@ final class StockfishEngine: ObservableObject {
                 success = false
             }
         }
-        task.resume()
+        // Hold the session strongly for the duration of the download.
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        delegate.session = session
+        session.downloadTask(with: url).resume()
         semaphore.wait()
+        session.invalidateAndCancel()
         return success
     }
 
-    /// URLSession delegate for download progress.
+    /// URLSession delegate for download progress + completion.
     private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+        var session: URLSession?  // strong ref keeps session alive during download
         var onProgress: ((Int64, Int64) -> Void)?
+        var onComplete: ((URL?) -> Void)?
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                         didWriteData bytesWritten: Int64,
                         totalBytesWritten: Int64,
@@ -182,7 +187,13 @@ final class StockfishEngine: ObservableObject {
             onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
         }
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                        didFinishDownloadingTo location: URL) {}
+                        didFinishDownloadingTo location: URL) {
+            onComplete?(location)
+        }
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        didCompleteWithError error: Error?) {
+            if error != nil { onComplete?(nil) }
+        }
     }
 
     // Legacy simple download (kept for reference, not used).
