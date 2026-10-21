@@ -56,6 +56,15 @@ final class KnowledgeStore: ObservableObject {
         try? FileManager.default.removeItem(at: fileURL)
         DispatchQueue.main.async { self.weights = nil }
     }
+
+    /// URL of the exported weights file, or nil if no trained network exists.
+    /// Use with ShareLink to let the user export the network.
+    func exportURL() -> URL? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        return fileURL
+    }
 }
 
 /// Flat weight storage, matching the KnowledgeNet architecture.
