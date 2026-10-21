@@ -248,7 +248,10 @@ final class StockfishEngine: ObservableObject {
     /// - Parameter depth: the "foresight" setting (1-3), mapped to a time budget.
     /// - Returns: UCI move string (e.g. "e2e4"), or nil on failure.
     func bestMove(fen: String, depth: Int) -> String? {
-        guard sf_is_running() != 0 else { return nil }
+        guard sf_is_running() != 0 else {
+            print("[Stockfish] bestMove: engine not running")
+            return nil
+        }
 
         // Map foresight to a time budget — depth-based search is unpredictable
         // on mobile CPUs. 1s / 3s / 8s keeps moves snappy.
