@@ -97,10 +97,13 @@ final class GameViewModel: ObservableObject {
                 Thread.sleep(forTimeInterval: 0.5)
             }
             guard let uci = uciMove, let pos = position, let move = chosen else {
-                // Stockfish failed twice — show error instead of soft-locking.
+                // Stockfish failed twice — show diagnostic instead of soft-locking.
+                let running = StockfishEngine.shared.isReady
+                let diag = running ? "Stockfish is ready but didn't return a move." :
+                    "Stockfish isn't ready yet (isReady=false). Wait for the download/engine to finish."
                 Task { @MainActor [weak self] in
                     self?.aiThinking = false
-                    self?.aiExplanation = "Stockfish didn't respond. Try moving foresight or restarting the app."
+                    self?.aiExplanation = "Stockfish failed: \(diag)"
                     self?.updateStatus()
                 }
                 return
