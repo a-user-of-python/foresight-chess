@@ -247,6 +247,7 @@ struct BoardView: View {
                             .cornerRadius(18)
                     }
                     .accessibilityLabel("Promote to \(type.rawValue)")
+                    }
                 }
             }
 
