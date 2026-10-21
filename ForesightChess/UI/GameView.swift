@@ -106,7 +106,6 @@ final class GameViewModel: ObservableObject {
                 return
             }
             let chosenMove = move
-            let pos = pos
             let uciStr = uci
 
             // KnowledgeNet learns from Stockfish's evaluation (distillation).
