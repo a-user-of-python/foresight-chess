@@ -28,7 +28,7 @@
 #include <filesystem>
 
 #define INCBIN_SILENCE_BITCODE_WARNING
-#include "../incbin/incbin.h"
+#include "incbin.h"
 
 #include "../evaluate.h"
 #include "../misc.h"
