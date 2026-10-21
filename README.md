@@ -1,19 +1,30 @@
 # Foresight Chess
 
-A chess app where Apple's on-device AI (Foundation Models) plays the game, consulting a chess neural network as its reference.
+A chess app where **Stockfish** — the open-source chess engine — plays the game, while an on-device neural network learns from it.
 
 ## How it works
 
-- **Foundation Models** (iOS 26+, Apple Intelligence devices) chooses the moves and explains its reasoning
-- **KnowledgeNet** — an on-device neural network (911 inputs, trained from scratch) evaluates positions as the AI's chess reference
-- **Adjustable foresight** — set how many moves ahead the AI can see (1-3, in-app slider)
-- The network learns from every game and gets better over time
+- **Stockfish** (embedded C++ engine) plays Black's moves at adjustable depth
+- **KnowledgeNet** — an on-device neural network (911 inputs) learns from Stockfish's evaluations after every move (knowledge distillation), getting stronger over time
+- **Adjustable foresight** — in-app slider (1-3) maps to Stockfish search depth 8/12/16
+- **Export Network** — share the trained weights as JSON from Settings (appears after your first game)
+- **First launch** downloads Stockfish's NNUE neural networks (~75MB total) with a progress screen; cached afterwards
 
 ## Requirements
 
-- iOS 17+ to run (neural network plays directly)
-- iOS 26+ with Apple Intelligence for the Foundation Models player
+- iOS 17+
 
 ## Building
 
 Push to main triggers the unsigned IPA build via GitHub Actions. Download from workflow artifacts.
+
+## Third-party software
+
+This project embeds **Stockfish** (https://github.com/official-stockfish/Stockfish),
+Copyright © The Stockfish developers, licensed under the **GNU General Public
+License v3.0**. The full license text is in [COPYING.txt](COPYING.txt).
+
+Because Stockfish is GPLv3, this entire project is distributed under GPLv3.
+
+---
+Built with Muse
