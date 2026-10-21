@@ -64,11 +64,11 @@ final class ForesightSearch {
     private func alphaBeta(game: ChessGame, depth: Int,
                            alpha: Float, beta: Float) -> (Float, [Move]) {
         if game.isGameOver || depth <= 0 {
-            return (evaluate(game), [])
+            return (evaluate(game: game), [])
         }
 
         let moves = orderedMoves(game: game)
-        guard !moves.isEmpty else { return (evaluate(game), []) }
+        guard !moves.isEmpty else { return (evaluate(game: game), []) }
 
         let maximizing = (game.sideToMove == .white)
         var a = alpha
