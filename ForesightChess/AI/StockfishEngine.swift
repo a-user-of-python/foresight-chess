@@ -245,15 +245,19 @@ final class StockfishEngine: ObservableObject {
     }
 
     /// Get Stockfish's best move for a FEN position.
-    /// - Parameter depth: search depth (the "foresight" setting).
+    /// - Parameter depth: the "foresight" setting (1-3), mapped to a time budget.
     /// - Returns: UCI move string (e.g. "e2e4"), or nil on failure.
     func bestMove(fen: String, depth: Int) -> String? {
         guard sf_is_running() != 0 else { return nil }
 
-        sf_send("position fen \(fen)\n")
-        sf_send("go depth \(depth)\n")
+        // Map foresight to a time budget — depth-based search is unpredictable
+        // on mobile CPUs. 1s / 3s / 8s keeps moves snappy.
+        let movetime = [1: 1000, 2: 3000, 3: 8000][depth] ?? 2000
 
-        let deadline = Date().addingTimeInterval(Double(depth) * 2 + 10)
+        sf_send("position fen \(fen)\n")
+        sf_send("go movetime \(movetime)\n")
+
+        let deadline = Date().addingTimeInterval(Double(movetime) / 1000.0 + 10)
         var buf = [CChar](repeating: 0, count: 8192)
         var output = ""
 
@@ -280,9 +284,9 @@ final class StockfishEngine: ObservableObject {
         guard sf_is_running() != 0 else { return nil }
 
         sf_send("position fen \(fen)\n")
-        sf_send("go depth \(depth)\n")
+        sf_send("go movetime 1500\n")
 
-        let deadline = Date().addingTimeInterval(Double(depth) * 2 + 10)
+        let deadline = Date().addingTimeInterval(12)
         var buf = [CChar](repeating: 0, count: 8192)
         var output = ""
         var lastScore: Float?
