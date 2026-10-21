@@ -243,7 +243,7 @@ struct BoardView: View {
                             .foregroundColor(userColor == PieceColor.white ? SwiftUI.Color.white : SwiftUI.Color(white: 0.1))
                             .shadow(color: .black.opacity(0.6), radius: 3)
                             .frame(width: 92, height: 92)
-                            .background(Color(.secondarySystemBackground))
+                            .background(Color.gray.opacity(0.2))
                             .cornerRadius(18)
                     }
                     .accessibilityLabel("Promote to \(type.rawValue)")
