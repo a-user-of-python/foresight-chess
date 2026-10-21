@@ -51,5 +51,9 @@ struct ModelDownloadView: View {
             Spacer()
         }
         .padding()
+        .onAppear {
+            // Kick off the download when the screen appears.
+            engine.retryDownload(onComplete: onComplete)
+        }
     }
 }
