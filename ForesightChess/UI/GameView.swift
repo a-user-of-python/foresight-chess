@@ -16,8 +16,17 @@ final class GameViewModel: ObservableObject {
     private var gameID = UUID()
 
     /// Foresight depth in full moves (1...3). Adjustable in settings.
+    /// Clamped on set — never triggers recursion, never crashes.
     @Published var foresightMoves: Int = 2 {
-        didSet { foresightMoves = max(1, min(3, foresightMoves)) }
+        didSet {
+            let clamped = max(1, min(3, foresightMoves))
+            if clamped != foresightMoves {
+                // Defer to avoid didSet re-entry issues.
+                DispatchQueue.main.async { [weak self] in
+                    self?.foresightMoves = clamped
+                }
+            }
+        }
     }
 
     private func refresh() { objectWillChange.send() }
@@ -78,20 +87,29 @@ final class GameViewModel: ObservableObject {
             guard !candidates.isEmpty else { return }
 
             // Ask the Foundation Model to pick (or fall back to search best).
+            // 10-second timeout: if the model is slow, play the search's best
+            // instead of hanging.
             let chosen: Move
             let explanation: String
             if #available(iOS 26, *) {
                 let semaphore = DispatchSemaphore(value: 0)
                 var result: (Move, String) = (candidates[0].move, "")
+                var finished = false
                 Task {
                     result = await FMPlayer.shared.chooseMove(
                         game: position, candidates: candidates,
                         foresightMoves: foresight)
+                    finished = true
                     semaphore.signal()
                 }
-                semaphore.wait()
-                chosen = result.0
-                explanation = result.1
+                let waitResult = semaphore.wait(timeout: .now() + 10)
+                if waitResult == .timedOut || !finished {
+                    chosen = candidates[0].move
+                    explanation = "AI took too long — playing the network's top choice."
+                } else {
+                    chosen = result.0
+                    explanation = result.1
+                }
             } else {
                 chosen = candidates[0].move
                 explanation = "Foundation Models needs iOS 26 — playing the network's choice."
