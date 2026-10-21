@@ -254,6 +254,9 @@ final class StockfishEngine: ObservableObject {
         // on mobile CPUs. 1s / 3s / 8s keeps moves snappy.
         let movetime = [1: 1000, 2: 3000, 3: 8000][depth] ?? 2000
 
+        // Stop any stuck search first, then set up the position.
+        sf_send("stop\n")
+        Thread.sleep(forTimeInterval: 0.1)
         sf_send("position fen \(fen)\n")
         sf_send("go movetime \(movetime)\n")
 
