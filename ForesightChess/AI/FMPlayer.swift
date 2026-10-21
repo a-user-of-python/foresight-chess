@@ -91,12 +91,13 @@ final class FMPlayer: ObservableObject {
         lines.append("(score: positive favors White, negative favors Black):")
         lines.append("")
 
-        // Top 5 candidates with evals and principal variations.
-        for (i, c) in candidates.prefix(5).enumerated() {
+        // Top 3 candidates with evals and principal variations.
+        // Kept short: the on-device model is faster with a compact prompt.
+        for (i, c) in candidates.prefix(3).enumerated() {
             let eval = String(format: "%+.2f", c.value)
             let lineStr = c.line.prefix(foresightMoves * 2 + 1)
                 .map { $0.uci }.joined(separator: " ")
-            lines.append("\(i + 1). \(c.move.uci) (eval \(eval)) — line: \(lineStr)")
+            lines.append("\(i + 1). \(c.move.uci) (\(eval)): \(lineStr)")
         }
 
         lines.append("")
