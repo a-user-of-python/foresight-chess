@@ -67,7 +67,7 @@ final class GameViewModel: ObservableObject {
         finishGame(result: .blackWins, message: "You resigned. AI wins.")
     }
 
-    // MARK: - AI turn
+    // MARK: - AI turn (Stockfish)
 
     private func triggerAIMove() {
         guard !game.isGameOver, game.sideToMove == .black,
@@ -77,43 +77,25 @@ final class GameViewModel: ObservableObject {
 
         let id = gameID
         let fen = game.toFEN()
-        let foresight = foresightMoves
+        // Foresight slider maps to Stockfish search depth.
+        let depth = [8, 12, 16][foresightMoves - 1]
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let network = KnowledgeStore.shared.currentNetwork()
-            let search = ForesightSearch(network: network, foresightMoves: foresight)
-            guard let position = ChessGame(fen: fen) else { return }
-            let candidates = search.searchCandidates(game: position)
-            guard !candidates.isEmpty else { return }
-
-            // Ask the Foundation Model to pick (or fall back to search best).
-            // 10-second timeout: if the model is slow, play the search's best
-            // instead of hanging.
-            let chosen: Move
-            let explanation: String
-            if #available(iOS 26, *) {
-                let semaphore = DispatchSemaphore(value: 0)
-                var result: (Move, String) = (candidates[0].move, "")
-                var finished = false
-                Task {
-                    result = await FMPlayer.shared.chooseMove(
-                        game: position, candidates: candidates,
-                        foresightMoves: foresight)
-                    finished = true
-                    semaphore.signal()
+            // Stockfish plays the move.
+            guard let uciMove = StockfishEngine.shared.bestMove(fen: fen, depth: depth),
+                  let position = ChessGame(fen: fen),
+                  let chosen = position.legalMoves().first(where: { $0.uci == uciMove }) else {
+                // Stockfish failed — shouldn't happen, but don't hang.
+                Task { @MainActor [weak self] in
+                    self?.aiThinking = false
+                    self?.updateStatus()
                 }
-                let waitResult = semaphore.wait(timeout: .now() + 10)
-                if waitResult == .timedOut || !finished {
-                    chosen = candidates[0].move
-                    explanation = "AI took too long — playing the network's top choice."
-                } else {
-                    chosen = result.0
-                    explanation = result.1
-                }
-            } else {
-                chosen = candidates[0].move
-                explanation = "Foundation Models needs iOS 26 — playing the network's choice."
+                return
             }
+
+            // KnowledgeNet learns from Stockfish's evaluation (distillation).
+            // Done in background, doesn't block the move.
+            let sfEval = StockfishEngine.shared.evaluate(fen: fen, depth: 10)
 
             Task { @MainActor [weak self] in
                 guard let self = self,
@@ -124,8 +106,22 @@ final class GameViewModel: ObservableObject {
                 self.refresh()
                 self.lastMove = chosen
                 self.selectedSquare = nil
-                self.aiExplanation = explanation
+                self.aiExplanation = "Stockfish (depth \(depth)) played \(uciMove)."
                 self.updateStatus()
+
+                // Distillation: teach KnowledgeNet Stockfish's eval.
+                if let target = sfEval {
+                    DispatchQueue.global(qos: .utility).async {
+                        let network = KnowledgeStore.shared.currentNetwork()
+                        let x = PositionEncoder.encode(position)
+                        // Train all 3 outputs toward Stockfish's eval.
+                        for _ in 0..<3 {
+                            network.train(x: x, targets: [target, target, target], lr: 0.01)
+                        }
+                        KnowledgeStore.shared.save(network.exportWeights())
+                    }
+                }
+
                 _ = self.checkGameOver()
             }
         }
