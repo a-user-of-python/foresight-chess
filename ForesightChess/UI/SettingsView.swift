@@ -29,6 +29,15 @@ struct SettingsView: View {
                          "It starts from scratch and gets smarter over time.")
                         .font(.callout)
                         .foregroundColor(.secondary)
+                    if let exportURL = KnowledgeStore.shared.exportURL() {
+                        ShareLink(item: exportURL) {
+                            Label("Export Network", systemImage: "square.and.arrow.up")
+                        }
+                    } else {
+                        Text("No trained network yet — play a game first.")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                    }
                     Button("Reset Knowledge", role: .destructive) {
                         showResetConfirm = true
                     }
