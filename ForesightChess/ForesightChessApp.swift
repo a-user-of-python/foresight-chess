@@ -2,15 +2,24 @@ import SwiftUI
 
 @main
 struct ForesightChessApp: App {
+    @ObservedObject private var engine = StockfishEngine.shared
+    @State private var downloadComplete = false
+
     init() {
-        // Start Stockfish on launch. Downloads both NNUE models
-        // (~75MB total) on first launch.
+        // Start Stockfish on launch. If NNUE models aren't cached,
+        // the download screen appears (see body).
         StockfishEngine.shared.start()
     }
 
     var body: some Scene {
         WindowGroup {
-            GameView()
+            if engine.needsDownload && !downloadComplete {
+                ModelDownloadView {
+                    downloadComplete = true
+                }
+            } else {
+                GameView()
+            }
         }
     }
 }
