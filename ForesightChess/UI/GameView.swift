@@ -84,7 +84,7 @@ final class GameViewModel: ObservableObject {
             // Stockfish plays the move. Retry once if the first attempt fails.
             var uciMove: String? = nil
             var position: ChessGame? = nil
-            var chosen: ChessMove? = nil
+            var chosen: Move? = nil
             for _ in 0..<2 {
                 uciMove = StockfishEngine.shared.bestMove(fen: fen, depth: depth)
                 if let m = uciMove,
