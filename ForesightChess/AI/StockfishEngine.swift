@@ -14,6 +14,8 @@ final class StockfishEngine: ObservableObject {
     @Published var isReady = false
     @Published var modelDownloaded = false
     @Published var downloadProgress: Double = 0
+    @Published var downloadFailed = false
+    @Published var needsDownload = false  // true on first launch
 
     /// NNUE network files in Documents (Stockfish 17 needs both).
     private let nnueBigFileName = "nn-1111cefa1111.nnue"    // ~71MB
@@ -31,44 +33,79 @@ final class StockfishEngine: ObservableObject {
     // MARK: - Startup
 
     /// Start the engine. Call once at app launch.
-    /// Downloads both NNUE models on first launch, then initializes UCI.
+    /// If models aren't downloaded, sets needsDownload = true so the UI
+    /// can show the download screen. Otherwise starts immediately.
     func start() {
         guard !started else { return }
         started = true
 
+        // Check if we need the download UI.
+        let bigOK = isValidNNUE(at: nnuePath(nnueBigFileName), expectedSize: 74874478)
+        let smallOK = isValidNNUE(at: nnuePath(nnueSmallFileName), expectedSize: 3519630)
+
+        if bigOK && smallOK {
+            DispatchQueue.main.async { self.modelDownloaded = true }
+            launchEngine()
+        } else {
+            DispatchQueue.main.async { self.needsDownload = true }
+        }
+    }
+
+    /// Called from the download UI. Downloads models with progress,
+    /// then launches the engine. On failure sets downloadFailed = true.
+    func retryDownload(onComplete: @escaping () -> Void) {
+        DispatchQueue.main.async { self.downloadFailed = false }
         queue.async { [weak self] in
             guard let self = self else { return }
+            self.downloadWithProgress()
+            DispatchQueue.main.async {
+                if self.modelDownloaded {
+                    self.needsDownload = false
+                    onComplete()
+                } else {
+                    self.downloadFailed = true
+                }
+            }
+        }
+    }
 
-            // 1. Ensure both NNUE models are downloaded.
-            self.ensureModelsDownloaded()
+    /// Download both models with real byte-level progress.
+    private func downloadWithProgress() {
+        let bigOK = downloadFileWithProgress(from: nnueBigURL, to: nnueBigFileName,
+                                             expectedSize: 74874478, weight: 0.95)
+        let smallOK = downloadFileWithProgress(from: nnueSmallURL, to: nnueSmallFileName,
+                                               expectedSize: 3519630, weight: 0.05)
+        let done = bigOK && smallOK
+        DispatchQueue.main.async {
+            self.modelDownloaded = done
+            self.downloadProgress = done ? 1.0 : self.downloadProgress
+            self.downloadFailed = !done
+        }
+        if done {
+            launchEngine()
+        }
+    }
 
-            // 2. Start the engine thread.
+    private func launchEngine() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
             sf_init()
-
-            // 3. Wait for it to come up.
             var attempts = 0
             while sf_is_running() == 0 && attempts < 100 {
                 Thread.sleep(forTimeInterval: 0.05)
                 attempts += 1
             }
-
-            // 4. UCI handshake.
             _ = self.sendAndWait("uci\n", expect: "uciok", timeout: 10)
             _ = self.sendAndWait("isready\n", expect: "readyok", timeout: 10)
-
-            // 5. Point to downloaded NNUEs if we have them.
             if self.modelDownloaded {
                 let bigPath = self.nnuePath(self.nnueBigFileName)
                 let smallPath = self.nnuePath(self.nnueSmallFileName)
-                _ = self.sendAndWait(
-                    "setoption name EvalFile value \(bigPath)\n",
-                    expect: "readyok", timeout: 5)
-                _ = self.sendAndWait(
-                    "setoption name EvalFileSmall value \(smallPath)\n",
-                    expect: "readyok", timeout: 5)
+                _ = self.sendAndWait("setoption name EvalFile value \(bigPath)\n",
+                                     expect: "readyok", timeout: 5)
+                _ = self.sendAndWait("setoption name EvalFileSmall value \(smallPath)\n",
+                                     expect: "readyok", timeout: 5)
                 _ = self.sendAndWait("isready\n", expect: "readyok", timeout: 10)
             }
-
             DispatchQueue.main.async { self.isReady = true }
         }
     }
@@ -97,17 +134,28 @@ final class StockfishEngine: ObservableObject {
         return magic == nnueMagic
     }
 
-    private func downloadFile(from urlString: String, to fileName: String,
-                              expectedSize: Int) -> Bool {
+    private func downloadFileWithProgress(from urlString: String, to fileName: String,
+                                          expectedSize: Int, weight: Double) -> Bool {
         let path = nnuePath(fileName)
-        // Skip if already valid.
         if isValidNNUE(at: path, expectedSize: expectedSize) { return true }
 
         guard let url = URL(string: urlString) else { return false }
-        let semaphore = DispatchSemaphore(value: 0)
-        var success = false
 
-        let task = URLSession.shared.downloadTask(with: url) { tmpURL, _, error in
+        // Use URLSession delegate for real progress.
+        let delegate = DownloadDelegate()
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        let baseProgress = downloadProgress
+
+        delegate.onProgress = { [weak self] received, expected in
+            guard expected > 0 else { return }
+            let fileProgress = Double(received) / Double(expected)
+            let total = baseProgress + fileProgress * weight
+            DispatchQueue.main.async { self?.downloadProgress = min(total, 1.0) }
+        }
+
+        var success = false
+        let semaphore = DispatchSemaphore(value: 0)
+        let task = session.downloadTask(with: url) { tmpURL, _, error in
             defer { semaphore.signal() }
             guard let tmpURL = tmpURL, error == nil else { return }
             let dest = URL(fileURLWithPath: path)
@@ -122,6 +170,26 @@ final class StockfishEngine: ObservableObject {
         task.resume()
         semaphore.wait()
         return success
+    }
+
+    /// URLSession delegate for download progress.
+    private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+        var onProgress: ((Int64, Int64) -> Void)?
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64,
+                        totalBytesWritten: Int64,
+                        totalBytesExpectedToWrite: Int64) {
+            onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {}
+    }
+
+    // Legacy simple download (kept for reference, not used).
+    private func downloadFile(from urlString: String, to fileName: String,
+                              expectedSize: Int) -> Bool {
+        return downloadFileWithProgress(from: urlString, to: fileName,
+                                        expectedSize: expectedSize, weight: 1.0)
     }
 
     private func ensureModelsDownloaded() {
