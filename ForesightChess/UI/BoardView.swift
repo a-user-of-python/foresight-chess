@@ -231,7 +231,8 @@ struct BoardView: View {
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 20) {
-                ForEach(promotionMoves ?? [Move](), id: \.promotion) { move in
+                if let moves = promotionMoves {
+                    ForEach(moves, id: \.promotion) { move in
                     let type = move.promotion ?? .queen
                     Button {
                         promotionMoves = nil
