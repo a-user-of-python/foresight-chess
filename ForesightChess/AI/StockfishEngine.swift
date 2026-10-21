@@ -15,12 +15,13 @@ final class StockfishEngine: ObservableObject {
     @Published var modelDownloaded = false
     @Published var downloadProgress: Double = 0
 
-    /// NNUE file name in Documents.
-    private let nnueFileName = "nn-stockfish.nnue"
+    /// NNUE network files in Documents (Stockfish 17 needs both).
+    private let nnueBigFileName = "nn-1111cefa1111.nnue"    // ~71MB
+    private let nnueSmallFileName = "nn-37f18f62d772.nnue"  // ~3.4MB
 
-    /// Download URL for the NNUE network (set after research).
-    /// Falls back to embedded net if download fails.
-    private var nnueURL: String = ""
+    /// Verified download URLs (data.stockfishchess.org).
+    private let nnueBigURL = "https://data.stockfishchess.org/nn/nn-1111cefa1111.nnue"
+    private let nnueSmallURL = "https://data.stockfishchess.org/nn/nn-37f18f62d772.nnue"
 
     private let queue = DispatchQueue(label: "stockfish.uci", qos: .userInitiated)
     private var started = false
@@ -30,17 +31,16 @@ final class StockfishEngine: ObservableObject {
     // MARK: - Startup
 
     /// Start the engine. Call once at app launch.
-    /// Downloads the NNUE model on first launch, then initializes UCI.
-    func start(nnueURL: String) {
+    /// Downloads both NNUE models on first launch, then initializes UCI.
+    func start() {
         guard !started else { return }
         started = true
-        self.nnueURL = nnueURL
 
         queue.async { [weak self] in
             guard let self = self else { return }
 
-            // 1. Ensure NNUE model is downloaded.
-            self.ensureModelDownloaded()
+            // 1. Ensure both NNUE models are downloaded.
+            self.ensureModelsDownloaded()
 
             // 2. Start the engine thread.
             sf_init()
@@ -56,13 +56,16 @@ final class StockfishEngine: ObservableObject {
             _ = self.sendAndWait("uci\n", expect: "uciok", timeout: 10)
             _ = self.sendAndWait("isready\n", expect: "readyok", timeout: 10)
 
-            // 5. Point to downloaded NNUE if we have it.
+            // 5. Point to downloaded NNUEs if we have them.
             if self.modelDownloaded {
-                let path = self.nnuePath()
+                let bigPath = self.nnuePath(self.nnueBigFileName)
+                let smallPath = self.nnuePath(self.nnueSmallFileName)
                 _ = self.sendAndWait(
-                    "setoption name EvalFile value \(path)\n",
+                    "setoption name EvalFile value \(bigPath)\n",
                     expect: "readyok", timeout: 5)
-                // Re-send isready to apply.
+                _ = self.sendAndWait(
+                    "setoption name EvalFileSmall value \(smallPath)\n",
+                    expect: "readyok", timeout: 5)
                 _ = self.sendAndWait("isready\n", expect: "readyok", timeout: 10)
             }
 
@@ -72,52 +75,67 @@ final class StockfishEngine: ObservableObject {
 
     // MARK: - Model download
 
-    private func nnuePath() -> String {
+    private func nnuePath(_ fileName: String) -> String {
         let docs = FileManager.default.urls(for: .documentDirectory,
                                             in: .userDomainMask)[0]
-        return docs.appendingPathComponent(nnueFileName).path
+        return docs.appendingPathComponent(fileName).path
     }
 
-    private func ensureModelDownloaded() {
-        let path = nnuePath()
-        if FileManager.default.fileExists(atPath: path) {
-            DispatchQueue.main.async {
-                self.modelDownloaded = true
-                self.downloadProgress = 1.0
-            }
-            return
-        }
+    /// NNUE magic bytes (little-endian) for integrity check.
+    private let nnueMagic: UInt32 = 0x7AF32F20
 
-        guard !nnueURL.isEmpty, let url = URL(string: nnueURL) else {
-            // No URL configured — use embedded net.
-            return
+    private func isValidNNUE(at path: String, expectedSize: Int) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? Int,
+              size == expectedSize,
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return false
         }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 4), data.count == 4 else { return false }
+        let magic = data.withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
+        return magic == nnueMagic
+    }
 
-        // Download with progress.
+    private func downloadFile(from urlString: String, to fileName: String,
+                              expectedSize: Int) -> Bool {
+        let path = nnuePath(fileName)
+        // Skip if already valid.
+        if isValidNNUE(at: path, expectedSize: expectedSize) { return true }
+
+        guard let url = URL(string: urlString) else { return false }
         let semaphore = DispatchSemaphore(value: 0)
+        var success = false
+
         let task = URLSession.shared.downloadTask(with: url) { tmpURL, _, error in
             defer { semaphore.signal() }
             guard let tmpURL = tmpURL, error == nil else { return }
             let dest = URL(fileURLWithPath: path)
             try? FileManager.default.removeItem(at: dest)
-            try? FileManager.default.moveItem(at: tmpURL, to: dest)
-            DispatchQueue.main.async {
-                self.modelDownloaded = true
-                self.downloadProgress = 1.0
+            do {
+                try FileManager.default.moveItem(at: tmpURL, to: dest)
+                success = self.isValidNNUE(at: path, expectedSize: expectedSize)
+            } catch {
+                success = false
             }
         }
         task.resume()
-
-        // Simple progress polling.
-        while task.state == .running {
-            if let expected = task.response?.expectedContentLength,
-               expected > 0, task.countOfBytesReceived > 0 {
-                let p = Double(task.countOfBytesReceived) / Double(expected)
-                DispatchQueue.main.async { self.downloadProgress = p }
-            }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
         semaphore.wait()
+        return success
+    }
+
+    private func ensureModelsDownloaded() {
+        // Big net (~71MB) + small net (~3.4MB).
+        let bigOK = downloadFile(from: nnueBigURL, to: nnueBigFileName,
+                                 expectedSize: 74874478)
+        let smallOK = downloadFile(from: nnueSmallURL, to: nnueSmallFileName,
+                                   expectedSize: 3519630)
+
+        let done = bigOK && smallOK
+        DispatchQueue.main.async {
+            self.modelDownloaded = done
+            self.downloadProgress = done ? 1.0 : 0
+        }
     }
 
     // MARK: - UCI
