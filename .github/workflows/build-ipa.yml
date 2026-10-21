@@ -1,0 +1,49 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Archive (unsigned)
+        run: |
+          xcodebuild \
+            -project ForesightChess.xcodeproj \
+            -scheme ForesightChess \
+            -configuration Release \
+            -archivePath "$PWD/build/ForesightChess.xcarchive" \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH="build/ForesightChess.xcarchive/Products/Applications/ForesightChess.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: .app not found at $APP_PATH"
+            find build -maxdepth 4 -type d | head -20
+            exit 1
+          fi
+          rm -rf Payload ForesightChess-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r ForesightChess-unsigned.ipa Payload
+          ls -lh ForesightChess-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForesightChess-unsigned
+          path: ForesightChess-unsigned.ipa
+          if-no-files-found: error
