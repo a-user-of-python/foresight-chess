@@ -141,10 +141,10 @@ final class GameViewModel: ObservableObject {
         } else if game.isStalemate {
             result = .draw
             message = "Draw by stalemate."
-        } else if game.isDrawByFiftyMoveRule {
+        } else if game.isDrawByFiftyMove {
             result = .draw
             message = "Draw by fifty-move rule."
-        } else if game.isDrawByThreefoldRepetition {
+        } else if game.isDrawByRepetition {
             result = .draw
             message = "Draw by threefold repetition."
         } else if game.isDrawByInsufficientMaterial {
